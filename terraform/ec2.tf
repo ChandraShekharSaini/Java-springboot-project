@@ -21,6 +21,24 @@ resource "aws_instance" "private_ec2_1a" {
 
   iam_instance_profile = aws_iam_instance_profile.ec2_admin_profile.name
 
+  user_data = <<-EOF
+              #!/bin/bash
+
+              # Install Docker
+              dnf install -y docker
+
+              # Start Docker
+              systemctl enable docker
+              systemctl start docker
+
+              # Add ec2-user to docker group
+              usermod -aG docker ec2-user
+
+              # Verify Docker
+              docker --version
+              systemctl is-active docker
+              EOF
+
   tags = {
     Name = "private-ec2-1a"
   }
