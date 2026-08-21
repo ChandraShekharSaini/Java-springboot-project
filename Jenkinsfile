@@ -1,4 +1,5 @@
 
+
 pipeline {
 
     agent any
@@ -7,8 +8,7 @@ pipeline {
 
         AWS_REGION = 'us-east-1'
 
-        TERRAFORM_REPO = 'https://github.com/ChandraShekharSaini/Java-springboot-project.git'
-        APP_REPO       = 'https://github.com/ChandraShekharSaini/Java-springboot-project.git'
+        PROJECT_REPO = 'https://github.com/ChandraShekharSaini/Java-springboot-project.git'
 
         TERRAFORM_DIR = 'terraform'
 
@@ -18,15 +18,19 @@ pipeline {
 
     stages {
 
-        stage('Checkout Terraform') {
+        // ============================================================
+        // 1. Checkout entire project ONCE
+        // ============================================================
+        stage('Checkout Project') {
             steps {
-                dir("${TERRAFORM_DIR}") {
-                    git branch: 'main',
-                        url: "${TERRAFORM_REPO}"
-                }
+                git branch: 'main',
+                    url: "${PROJECT_REPO}"
             }
         }
 
+        // ============================================================
+        // 2. Terraform Init
+        // ============================================================
         stage('Terraform Init') {
             steps {
                 dir("${TERRAFORM_DIR}") {
@@ -37,6 +41,9 @@ pipeline {
             }
         }
 
+        // ============================================================
+        // 3. Terraform Plan
+        // ============================================================
         stage('Terraform Plan') {
             steps {
                 dir("${TERRAFORM_DIR}") {
@@ -47,6 +54,9 @@ pipeline {
             }
         }
 
+        // ============================================================
+        // 4. Terraform Apply
+        // ============================================================
         stage('Terraform Apply') {
             steps {
                 dir("${TERRAFORM_DIR}") {
@@ -57,6 +67,9 @@ pipeline {
             }
         }
 
+        // ============================================================
+        // 5. Get Terraform Outputs
+        // ============================================================
         stage('Get AWS Resource IDs') {
             steps {
                 dir("${TERRAFORM_DIR}") {
@@ -72,27 +85,35 @@ pipeline {
                             returnStdout: true
                         ).trim()
 
-                        echo "EC2 Instance ID: ${env.EC2_INSTANCE_ID}"
-                        echo "ECR Repository: ${env.ECR_REPOSITORY}"
+                        echo "======================================"
+                        echo "Private EC2: ${env.EC2_INSTANCE_ID}"
+                        echo "ECR: ${env.ECR_REPOSITORY}"
+                        echo "======================================"
                     }
                 }
             }
         }
 
-        stage('Checkout Spring Boot Application') {
+        // ============================================================
+        // 6. Maven Build
+        // ============================================================
+        stage('Maven Build') {
             steps {
-                dir('application') {
-                    git branch: 'main',
-                        url: "${APP_REPO}"
+                dir('backend') {
+                    sh '''
+                        chmod +x mvnw || true
+                        ./mvnw clean package -DskipTests
+                    '''
                 }
             }
         }
 
-     
-
+        // ============================================================
+        // 7. Docker Build
+        // ============================================================
         stage('Docker Build') {
             steps {
-                dir('application/backend') {
+                dir('backend') {
                     sh '''
                         docker build \
                             -t ${IMAGE_NAME}:${IMAGE_TAG} \
@@ -102,6 +123,9 @@ pipeline {
             }
         }
 
+        // ============================================================
+        // 8. Login to ECR
+        // ============================================================
         stage('Login to ECR') {
             steps {
                 sh '''
@@ -114,6 +138,9 @@ pipeline {
             }
         }
 
+        // ============================================================
+        // 9. Push Docker Image
+        // ============================================================
         stage('Push Docker Image') {
             steps {
                 sh '''
@@ -134,9 +161,14 @@ pipeline {
             }
         }
 
-        stage('Deploy to EC2') {
+        // ============================================================
+        // 10. Deploy to PRIVATE EC2 using SSM
+        // ============================================================
+        stage('Deploy to Private EC2') {
             steps {
                 script {
+
+                    echo "Deploying to EC2: ${EC2_INSTANCE_ID}"
 
                     def commandId = sh(
                         script: """
@@ -149,7 +181,7 @@ pipeline {
                                     "docker pull ${ECR_REPOSITORY}:${IMAGE_TAG}",
                                     "docker stop ${IMAGE_NAME} || true",
                                     "docker rm ${IMAGE_NAME} || true",
-                                    "docker run -d --restart unless-stopped --name ${IMAGE_NAME} -p 8080:8084 ${ECR_REPOSITORY}:${IMAGE_TAG}"
+                                    "docker run -d --restart unless-stopped --name ${IMAGE_NAME} -p 8080:8080 ${ECR_REPOSITORY}:${IMAGE_TAG}"
                                 ]' \
                                 --query "Command.CommandId" \
                                 --output text
@@ -197,4 +229,3 @@ pipeline {
         }
     }
 }
-
