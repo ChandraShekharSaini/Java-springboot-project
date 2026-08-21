@@ -18,6 +18,10 @@ output "private_ec2_1b_private_ip" {
   value = aws_instance.private_ec2_1b.private_ip
 }
 
+output "private_ec2_1a_instance_id" {
+  value = aws_instance.private_ec2_1a.id
+}
+
 output "ecr_repository_url" {
   value = aws_ecr_repository.app.repository_url
 }
