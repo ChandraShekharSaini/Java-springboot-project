@@ -5,5 +5,11 @@ public class Main {
 
 
             var num= 10;
+
+
+         var num= 10;
+
+
+            var num= 10;
     }
 }
