@@ -257,7 +257,7 @@ jobs:
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
           subject: Backend Deployment Report - ${{ github.repository }}
-          to: ${{ secrets.EMAIL_TO }}
+          to: ${{ secrets.EMAIL_ID }}
           from: ${{ secrets.EMAIL_USERNAME }}
           body: |
             Repository: ${{ github.repository }}
