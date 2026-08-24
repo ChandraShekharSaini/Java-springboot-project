@@ -165,48 +165,65 @@ pipeline {
         // 10. Deploy to PRIVATE EC2 using SSM
         // ============================================================
         stage('Deploy to Private EC2') {
-            steps {
-                script {
+    steps {
+        script {
 
-                    echo "Deploying to EC2: ${EC2_INSTANCE_ID}"
+            echo "Deploying to EC2: ${EC2_INSTANCE_ID}"
 
-                    def commandId = sh(
-                        script: """
-                            aws ssm send-command \
-                                --region ${AWS_REGION} \
-                                --instance-ids ${EC2_INSTANCE_ID} \
-                                --document-name "AWS-RunShellScript" \
-                                --parameters 'commands=[
-                                    "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY}",
-                                    "docker pull ${ECR_REPOSITORY}:${IMAGE_TAG}",
-                                    "docker stop ${IMAGE_NAME} || true",
-                                    "docker rm ${IMAGE_NAME} || true",
-                                    "docker run -d --restart unless-stopped --name ${IMAGE_NAME} -p 8080:8080 ${ECR_REPOSITORY}:${IMAGE_TAG}"
-                                ]' \
-                                --query "Command.CommandId" \
-                                --output text
-                        """,
-                        returnStdout: true
-                    ).trim()
+            def commandId = sh(
+                script: """
+                    aws ssm send-command \
+                        --region ${AWS_REGION} \
+                        --instance-ids ${EC2_INSTANCE_ID} \
+                        --document-name "AWS-RunShellScript" \
+                        --parameters 'commands=[
+                            "set -e",
+                            "whoami",
+                            "docker --version",
+                            "systemctl is-active docker",
+                            "aws --version",
+                            "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY}",
+                            "docker pull ${ECR_REPOSITORY}:${IMAGE_TAG}",
+                            "docker stop ${IMAGE_NAME} || true",
+                            "docker rm ${IMAGE_NAME} || true",
+                            "docker run -d --restart unless-stopped --name ${IMAGE_NAME} -p 8080:8080 ${ECR_REPOSITORY}:${IMAGE_TAG}",
+                            "docker ps"
+                        ]' \
+                        --query "Command.CommandId" \
+                        --output text
+                """,
+                returnStdout: true
+            ).trim()
 
-                    echo "SSM Command ID: ${commandId}"
+            echo "SSM Command ID: ${commandId}"
 
-                    sh """
-                        aws ssm wait command-executed \
-                            --region ${AWS_REGION} \
-                            --command-id ${commandId} \
-                            --instance-id ${EC2_INSTANCE_ID}
-                    """
+            sleep 5
 
-                    sh """
-                        aws ssm get-command-invocation \
-                            --region ${AWS_REGION} \
-                            --command-id ${commandId} \
-                            --instance-id ${EC2_INSTANCE_ID}
-                    """
-                }
+            sh """
+                aws ssm get-command-invocation \
+                    --region ${AWS_REGION} \
+                    --command-id ${commandId} \
+                    --instance-id ${EC2_INSTANCE_ID}
+            """
+
+            def status = sh(
+                script: """
+                    aws ssm get-command-invocation \
+                        --region ${AWS_REGION} \
+                        --command-id ${commandId} \
+                        --instance-id ${EC2_INSTANCE_ID} \
+                        --query 'Status' \
+                        --output text
+                """,
+                returnStdout: true
+            ).trim()
+
+            if (status != 'Success') {
+                error("Remote deployment failed. SSM status: ${status}")
             }
         }
+    }
+}
     }
 
     post {
