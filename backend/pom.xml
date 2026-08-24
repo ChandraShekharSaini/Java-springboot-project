@@ -1,177 +1,312 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
-         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+name: Backend to EC2
 
-    <modelVersion>4.0.0</modelVersion>
+on:
+  workflow_dispatch:
 
-    <!-- Spring Boot -->
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>2.7.17</version>
-        <relativePath/>
-    </parent>
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
 
-    <!-- Project Information -->
-    <groupId>com.datastore</groupId>
-    <artifactId>datastore</artifactId>
-    <version>0.0.7</version>
+    steps:
 
-    <name>DataStore</name>
-    <description>DataStore</description>
+      # ============================================================
+      # 1. Checkout
+      # ============================================================
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    <!-- ========================================================= -->
-    <!-- Properties -->
-    <!-- ========================================================= -->
-    <properties>
+      # ============================================================
+      # 2. Java 21
+      # ============================================================
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
 
-        <!-- Application Java version -->
-        <java.version>11</java.version>
+      # ============================================================
+      # 3. Verify Java and Maven
+      # ============================================================
+      - name: Verify Java and Maven
+        run: |
+          echo "===== JAVA ====="
+          java -version
 
-        <!-- Encoding -->
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+          echo "===== JAVAC ====="
+          javac -version
 
-        <!-- SonarQube -->
-        <sonar.projectKey>backend</sonar.projectKey>
-        <sonar.projectName>backend</sonar.projectName>
+          echo "===== MAVEN ====="
+          mvn -version
 
-        <!-- JaCoCo -->
-        <jacoco.version>0.8.11</jacoco.version>
+      # ============================================================
+      # 4. Build + SonarQube
+      # ============================================================
+      - name: Build and SonarQube Scan
+        working-directory: backend
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          echo "===== BUILD + SONARQUBE ====="
 
-    </properties>
+          mvn clean verify \
+            -DskipTests \
+            org.sonarsource.scanner.maven:sonar-maven-plugin:5.4.0.6343:sonar \
+            -Dsonar.projectKey=backend \
+            -Dsonar.projectName=backend \
+            -Dsonar.host.url="$SONAR_HOST_URL" \
+            -Dsonar.token="$SONAR_TOKEN"
 
-    <!-- ========================================================= -->
-    <!-- Dependencies -->
-    <!-- ========================================================= -->
-    <dependencies>
+      # ============================================================
+      # 5. SonarQube Quality Gate
+      # ============================================================
+      - name: SonarQube Quality Gate
+        uses: SonarSource/sonarqube-quality-gate-action@v1.2.0
+        with:
+          scanMetadataReportFile: backend/target/sonar/report-task.txt
+          timeout-minutes: 10
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-        <!-- Spring Web -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
+      # ============================================================
+      # 6. Prepare EC2
+      # ============================================================
+      - name: Prepare EC2
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
 
-        <!-- Spring Data JPA -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jpa</artifactId>
-        </dependency>
+            echo "===== Installing dependencies ====="
 
-        <!-- MySQL -->
-        <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
-            <version>8.0.33</version>
-            <scope>runtime</scope>
-        </dependency>
+            sudo yum install -y \
+              git \
+              maven \
+              java-21-amazon-corretto-devel
 
-        <!-- Validation -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-        </dependency>
+            echo "===== Detecting Java 21 ====="
 
-        <!-- Actuator -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
-        </dependency>
+            JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
 
-        <!-- Prometheus -->
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-prometheus</artifactId>
-        </dependency>
+            echo "JAVA_HOME=$JAVA_HOME"
 
-        <!-- H2 -->
-        <dependency>
-            <groupId>com.h2database</groupId>
-            <artifactId>h2</artifactId>
-            <version>2.2.224</version>
-            <scope>runtime</scope>
-        </dependency>
+            sudo alternatives --set java "$JAVA_HOME/bin/java" || true
+            sudo alternatives --set javac "$JAVA_HOME/bin/javac" || true
 
-        <!-- AWS CloudWatch -->
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-registry-cloudwatch2</artifactId>
-        </dependency>
+            export JAVA_HOME="$JAVA_HOME"
+            export PATH="$JAVA_HOME/bin:$PATH"
 
-        <!-- Spring Boot Test -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
+            echo "===== Java ====="
+            java -version
 
-        <!-- JUnit 4 -->
-        <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <version>4.13.2</version>
-            <scope>test</scope>
-        </dependency>
+            echo "===== Javac ====="
+            javac -version
 
-    </dependencies>
+            echo "===== Maven ====="
+            mvn -version
 
-    <!-- ========================================================= -->
-    <!-- Build -->
-    <!-- ========================================================= -->
-    <build>
+      # ============================================================
+      # 7. Clone / Pull Repository
+      # ============================================================
+      - name: Clone / Pull Repository
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
 
-        <plugins>
+            APP_DIR=/home/ec2-user/app
+            REPO_NAME=Java-springboot-project
+            REPO_URL=https://github.com/CloudTechDevOps/Java-springboot-project.git
 
-            <!-- ================================================= -->
-            <!-- Spring Boot Maven Plugin -->
-            <!-- ================================================= -->
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-            </plugin>
+            mkdir -p "$APP_DIR"
 
-            <!-- ================================================= -->
-            <!-- JaCoCo Code Coverage -->
-            <!-- ================================================= -->
-            <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
-                <version>${jacoco.version}</version>
+            cd "$APP_DIR"
 
-                <executions>
+            if [ -d "$REPO_NAME/.git" ]; then
 
-                    <!-- Attach JaCoCo agent before tests -->
-                    <execution>
-                        <id>prepare-agent</id>
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
-                    </execution>
+              echo "Repository already exists"
 
-                    <!-- Generate coverage report -->
-                    <execution>
-                        <id>report</id>
-                        <phase>verify</phase>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
-                    </execution>
+              cd "$REPO_NAME"
 
-                </executions>
-            </plugin>
+              git reset --hard
+              git clean -fd
+              git pull origin main
 
-            <!-- ================================================= -->
-            <!-- SonarQube Maven Scanner -->
-            <!-- ================================================= -->
-            <plugin>
-                <groupId>org.sonarsource.scanner.maven</groupId>
-                <artifactId>sonar-maven-plugin</artifactId>
-                <version>5.4.0.6343</version>
-            </plugin>
+            else
 
-        </plugins>
+              echo "Cloning repository"
 
-    </build>
+              git clone "$REPO_URL"
 
-</project>
+              cd "$REPO_NAME"
+
+            fi
+
+      # ============================================================
+      # 8. Build Maven Application
+      # ============================================================
+      - name: Build Maven Application
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
+
+            export JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto.x86_64
+            export PATH=$JAVA_HOME/bin:$PATH
+
+            cd /home/ec2-user/app/Java-springboot-project/backend
+
+            echo "===== Java ====="
+            java -version
+
+            echo "===== Maven ====="
+            mvn -version
+
+            echo "===== Building Application ====="
+
+            mvn clean package -DskipTests -U
+
+            echo "===== Generated JAR ====="
+
+            ls -lh target/*.jar
+
+      # ============================================================
+      # 9. Stop Old Application
+      # ============================================================
+      - name: Stop Old Application
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_KEY }}
+          script_stop: false
+          script: |
+            PID=$(ps -ef | grep '[d]atastore-0.0.7.jar' | awk '{print $2}')
+
+            if [ -z "$PID" ]; then
+              echo "Application is not running."
+              exit 0
+            fi
+
+            echo "Stopping PID: $PID"
+
+            kill -15 $PID
+
+            sleep 5
+
+            if ps -p $PID > /dev/null 2>&1; then
+              echo "Force killing PID: $PID"
+              kill -9 $PID
+            fi
+
+            echo "Application stopped."
+
+      # ============================================================
+      # 10. Start Application
+      # ============================================================
+      - name: Start Application
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
+
+            export JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto.x86_64
+            export PATH=$JAVA_HOME/bin:$PATH
+
+            LOG_DIR=/var/log/app
+
+            sudo mkdir -p "$LOG_DIR"
+            sudo chown ec2-user:ec2-user "$LOG_DIR"
+
+            cd /home/ec2-user/app/Java-springboot-project/backend/target
+
+            nohup env \
+              MYSQL_HOST="${{ secrets.DB_HOST }}" \
+              MYSQL_PORT=3306 \
+              MYSQL_USERNAME="${{ secrets.DB_USERNAME }}" \
+              MYSQL_PASSWORD="${{ secrets.DB_PASSWORD }}" \
+              LOG_FILE_PATH="$LOG_DIR/datastore.log" \
+              java -jar datastore-0.0.7.jar \
+              --server.port=8084 \
+              > "$LOG_DIR/nohup.out" 2>&1 &
+
+            echo "Application started."
+
+      # ============================================================
+      # 11. Wait
+      # ============================================================
+      - name: Wait for App Startup
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            sleep 15
+
+      # ============================================================
+      # 12. Verify Application
+      # ============================================================
+      - name: Verify Application
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
+
+            echo "===== Application Health ====="
+
+            HEALTH=$(curl -s http://localhost:8084/actuator/health)
+
+            echo "$HEALTH"
+
+            if [[ "$HEALTH" != *'"status":"UP"'* ]]; then
+              echo "Application health check failed."
+
+              echo "===== Application Logs ====="
+              tail -100 /var/log/app/nohup.out || true
+
+              exit 1
+            fi
+
+            echo "Application is healthy."
+
+      # ============================================================
+      # 13. Deployment Report
+      # ============================================================
+      - name: Send Deployment Report
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: Backend Deployment Report - ${{ github.repository }}
+          to: ${{ secrets.EMAIL_TO }}
+          from: ${{ secrets.EMAIL_USERNAME }}
+          body: |
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Status: ${{ job.status }}
+            Actor: ${{ github.actor }}
+            Workflow: ${{ github.workflow }}
+            SonarQube: Completed
+            Quality Gate: Passed if workflow succeeded.
