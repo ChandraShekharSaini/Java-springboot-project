@@ -38,17 +38,18 @@ jobs:
       # 4. Build + SonarQube
       # ============================================================
       - name: Build and SonarQube Scan
-        working-directory: backend
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        run: |
-          mvn clean verify sonar:sonar \
-            -DskipTests \
-            -Dsonar.projectKey=backend \
-            -Dsonar.projectName=backend \
-            -Dsonar.host.url="$SONAR_HOST_URL" \
-            -Dsonar.token="$SONAR_TOKEN"
+  working-directory: backend
+  env:
+    SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+  run: |
+    mvn clean verify \
+      -DskipTests \
+      org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+      -Dsonar.projectKey=backend \
+      -Dsonar.projectName=backend \
+      -Dsonar.host.url="$SONAR_HOST_URL" \
+      -Dsonar.token="$SONAR_TOKEN"
 
       # ============================================================
       # 5. SonarQube Quality Gate
