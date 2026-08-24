@@ -1,9 +1,6 @@
 name: Backend to EC2
 
 on:
-  # push:
-  #   branches:
-  #     - main
   workflow_dispatch:
 
 jobs:
@@ -11,16 +8,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================================
+      # 1. Checkout
+      # ============================================================
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      # ============================================================
+      # 2. Java 21
+      # ============================================================
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '21'
           cache: maven
-      
+
+      # ============================================================
+      # 3. Verify Java
+      # ============================================================
+      - name: Verify Java and Maven
+        run: |
+          java -version
+          javac -version
+          mvn -version
+
+      # ============================================================
+      # 4. Build + SonarQube
+      # ============================================================
       - name: Build and SonarQube Scan
         working-directory: backend
         env:
@@ -31,17 +47,23 @@ jobs:
             -DskipTests \
             -Dsonar.projectKey=backend \
             -Dsonar.projectName=backend \
-            -Dsonar.host.url=$SONAR_HOST_URL \
-            -Dsonar.token=$SONAR_TOKEN
-      
+            -Dsonar.host.url="$SONAR_HOST_URL" \
+            -Dsonar.token="$SONAR_TOKEN"
+
+      # ============================================================
+      # 5. SonarQube Quality Gate
+      # ============================================================
       - name: SonarQube Quality Gate
         uses: SonarSource/sonarqube-quality-gate-action@v1.2.0
         with:
           scanMetadataReportFile: backend/target/sonar/report-task.txt
-        timeout-minutes: 10
+          timeout-minutes: 10
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+      # ============================================================
+      # 6. Prepare EC2
+      # ============================================================
       - name: Prepare EC2
         uses: appleboy/ssh-action@v1.1.0
         with:
@@ -50,8 +72,27 @@ jobs:
           key: ${{ secrets.EC2_KEY }}
           script: |
             set -e
-            sudo yum install -y git maven java-17-amazon-corretto
 
+            sudo yum install -y git maven java-21-amazon-corretto-devel
+
+            JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
+
+            echo "JAVA_HOME=$JAVA_HOME"
+
+            java -version
+            javac -version
+
+            sudo alternatives --set java "$JAVA_HOME/bin/java" || true
+            sudo alternatives --set javac "$JAVA_HOME/bin/javac" || true
+
+            export JAVA_HOME="$JAVA_HOME"
+            export PATH="$JAVA_HOME/bin:$PATH"
+
+            mvn -version
+
+      # ============================================================
+      # 7. Clone / Pull Repository
+      # ============================================================
       - name: Clone / Pull Repository
         uses: appleboy/ssh-action@v1.1.0
         with:
@@ -60,20 +101,26 @@ jobs:
           key: ${{ secrets.EC2_KEY }}
           script: |
             set -e
+
             APP_DIR=/home/ec2-user/app
             REPO_NAME=Java-springboot-project
             REPO_URL=https://github.com/CloudTechDevOps/Java-springboot-project.git
-            mkdir -p $APP_DIR
-            cd $APP_DIR
+
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
             if [ -d "$REPO_NAME/.git" ]; then
-              cd $REPO_NAME
+              cd "$REPO_NAME"
               git reset --hard
               git pull origin main
             else
-              git clone $REPO_URL
-              cd $REPO_NAME
+              git clone "$REPO_URL"
+              cd "$REPO_NAME"
             fi
 
+      # ============================================================
+      # 8. Build Maven Application
+      # ============================================================
       - name: Build Maven Application
         uses: appleboy/ssh-action@v1.1.0
         with:
@@ -81,9 +128,24 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_KEY }}
           script: |
+            set -e
+
+            export JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto.x86_64
+            export PATH=$JAVA_HOME/bin:$PATH
+
             cd /home/ec2-user/app/Java-springboot-project/backend
+
+            echo "Java:"
+            java -version
+
+            echo "Maven:"
+            mvn -version
+
             mvn clean package -DskipTests -U
 
+      # ============================================================
+      # 9. Stop Old Application
+      # ============================================================
       - name: Stop Old Application
         uses: appleboy/ssh-action@v1.1.0
         with:
@@ -93,23 +155,28 @@ jobs:
           script_stop: false
           script: |
             PID=$(ps -ef | grep '[d]atastore-0.0.7.jar' | awk '{print $2}')
-      
+
             if [ -z "$PID" ]; then
               echo "Application is not running."
               exit 0
             fi
-      
+
             echo "Stopping PID: $PID"
+
             kill -15 $PID
+
             sleep 5
-      
+
             if ps -p $PID > /dev/null 2>&1; then
               echo "Force killing PID: $PID"
               kill -9 $PID
             fi
-      
+
             echo "Application stopped."
 
+      # ============================================================
+      # 10. Start Application
+      # ============================================================
       - name: Start Application
         uses: appleboy/ssh-action@v1.1.0
         with:
@@ -117,27 +184,45 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_KEY }}
           script: |
-            LOG_DIR=/var/log/app
-            sudo mkdir -p $LOG_DIR
-            sudo chown ec2-user:ec2-user $LOG_DIR
-            cd /home/ec2-user/app/Java-springboot-project/backend/target
-            nohup env \
-              MYSQL_HOST=${{ secrets.DB_HOST }} \
-              MYSQL_PORT=3306 \
-              MYSQL_USERNAME=${{ secrets.DB_USERNAME }} \
-              MYSQL_PASSWORD=${{ secrets.DB_PASSWORD }} \
-              LOG_FILE_PATH=$LOG_DIR/datastore.log \
-              java -jar datastore-0.0.7.jar --server.port=8084 \
-              > $LOG_DIR/nohup.out 2>&1 &
+            set -e
 
+            export JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto.x86_64
+            export PATH=$JAVA_HOME/bin:$PATH
+
+            LOG_DIR=/var/log/app
+
+            sudo mkdir -p "$LOG_DIR"
+            sudo chown ec2-user:ec2-user "$LOG_DIR"
+
+            cd /home/ec2-user/app/Java-springboot-project/backend/target
+
+            nohup env \
+              MYSQL_HOST="${{ secrets.DB_HOST }}" \
+              MYSQL_PORT=3306 \
+              MYSQL_USERNAME="${{ secrets.DB_USERNAME }}" \
+              MYSQL_PASSWORD="${{ secrets.DB_PASSWORD }}" \
+              LOG_FILE_PATH="$LOG_DIR/datastore.log" \
+              java -jar datastore-0.0.7.jar \
+              --server.port=8084 \
+              > "$LOG_DIR/nohup.out" 2>&1 &
+
+            echo "Application started."
+
+      # ============================================================
+      # 11. Wait
+      # ============================================================
       - name: Wait for App Startup
         uses: appleboy/ssh-action@v1.1.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_KEY }}
-          script: sleep 15
+          script: |
+            sleep 15
 
+      # ============================================================
+      # 12. Verify Application
+      # ============================================================
       - name: Verify Application
         uses: appleboy/ssh-action@v1.1.0
         with:
@@ -145,10 +230,22 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_KEY }}
           script: |
-            HEALTH=$(curl -s http://localhost:8084/actuator/health)
-            echo "$HEALTH"
-            [[ "$HEALTH" == *'"status":"UP"'* ]]
+            set -e
 
+            HEALTH=$(curl -s http://localhost:8084/actuator/health)
+
+            echo "$HEALTH"
+
+            if [[ "$HEALTH" != *'"status":"UP"'* ]]; then
+              echo "Application health check failed."
+              exit 1
+            fi
+
+            echo "Application is healthy."
+
+      # ============================================================
+      # 13. Deployment Report
+      # ============================================================
       - name: Send Deployment Report
         if: always()
         uses: dawidd6/action-send-mail@v3
