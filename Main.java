@@ -1,5 +1,32 @@
 public class Main {
     public static void main(String[] args) {
-        System.out.println("Hello, World!");
+
+        var num= 10;
+          var num= 10;
+          var num= 10;
+          var num= 10;
+mmmmmmmmmmmmmmmmmmmmmmmmm
+
+        var num= 10;
+          var num= 10;
+          var num= 10;
+          var num= 10;
+mmmmmmmmmmmmmmmmmmmmmmmmm
+
+            var num= 10;
+          var num= 10;
+          var num= 10;
+          var num= 10;
+mmmmmmmmmmmmmmmmmmmmmmmmm
+
+        var num= 10;
+          var num= 10;
+          var num= 10;
+          var num= 10;
+
+          
+
+
+        ;
     }
 }
