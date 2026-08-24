@@ -26,7 +26,7 @@ jobs:
           cache: maven
 
       # ============================================================
-      # 3. Verify Java
+      # 3. Verify Java and Maven
       # ============================================================
       - name: Verify Java and Maven
         run: |
@@ -38,18 +38,18 @@ jobs:
       # 4. Build + SonarQube
       # ============================================================
       - name: Build and SonarQube Scan
-  working-directory: backend
-  env:
-    SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-    SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-  run: |
-    mvn clean verify \
-      -DskipTests \
-      org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
-      -Dsonar.projectKey=backend \
-      -Dsonar.projectName=backend \
-      -Dsonar.host.url="$SONAR_HOST_URL" \
-      -Dsonar.token="$SONAR_TOKEN"
+        working-directory: backend
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          mvn clean verify \
+            -DskipTests \
+            org.sonarsource.scanner.maven:sonar-maven-plugin:5.4.0.6343:sonar \
+            -Dsonar.projectKey=backend \
+            -Dsonar.projectName=backend \
+            -Dsonar.host.url="$SONAR_HOST_URL" \
+            -Dsonar.token="$SONAR_TOKEN"
 
       # ============================================================
       # 5. SonarQube Quality Gate
@@ -74,14 +74,14 @@ jobs:
           script: |
             set -e
 
-            sudo yum install -y git maven java-21-amazon-corretto-devel
+            sudo yum install -y \
+              git \
+              maven \
+              java-21-amazon-corretto-devel
 
             JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
 
             echo "JAVA_HOME=$JAVA_HOME"
-
-            java -version
-            javac -version
 
             sudo alternatives --set java "$JAVA_HOME/bin/java" || true
             sudo alternatives --set javac "$JAVA_HOME/bin/javac" || true
@@ -89,6 +89,8 @@ jobs:
             export JAVA_HOME="$JAVA_HOME"
             export PATH="$JAVA_HOME/bin:$PATH"
 
+            java -version
+            javac -version
             mvn -version
 
       # ============================================================
@@ -113,6 +115,7 @@ jobs:
             if [ -d "$REPO_NAME/.git" ]; then
               cd "$REPO_NAME"
               git reset --hard
+              git clean -fd
               git pull origin main
             else
               git clone "$REPO_URL"
@@ -136,13 +139,17 @@ jobs:
 
             cd /home/ec2-user/app/Java-springboot-project/backend
 
-            echo "Java:"
+            echo "===== Java ====="
             java -version
 
-            echo "Maven:"
+            echo "===== Maven ====="
             mvn -version
 
+            echo "===== Building ====="
             mvn clean package -DskipTests -U
+
+            echo "===== JAR ====="
+            ls -lh target/*.jar
 
       # ============================================================
       # 9. Stop Old Application
@@ -239,6 +246,7 @@ jobs:
 
             if [[ "$HEALTH" != *'"status":"UP"'* ]]; then
               echo "Application health check failed."
+              tail -100 /var/log/app/nohup.out || true
               exit 1
             fi
 
