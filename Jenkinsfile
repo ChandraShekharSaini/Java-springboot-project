@@ -102,7 +102,7 @@ pipeline {
                 dir('backend') {
                     sh '''
                         chmod +x mvnw || true
-                        ./mvnw clean package -DskipTests
+                        ./mvn clean package -DskipTests
                     '''
                 }
             }
