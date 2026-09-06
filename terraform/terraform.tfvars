@@ -1,2 +1,2 @@
-ami_id = "ami-0572428f0faeff253"
-key_name = "k"
+ami_id = "ami-081b0a6eac00b4f53"
+key_name = "new_"
