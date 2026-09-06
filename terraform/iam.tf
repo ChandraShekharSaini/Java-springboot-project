@@ -1,5 +1,5 @@
 resource "aws_iam_role" "ec2_admin_role" {
-  name = "ec2-admin-role"
+  name = "ec2-admin-role-${random_string.suffix.result}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -24,6 +24,6 @@ resource "aws_iam_role_policy_attachment" "ec2_admin" {
 }
 
 resource "aws_iam_instance_profile" "ec2_admin_profile" {
-  name = "ec2-admin-profile"
+  name = "ec2-admin-profile-${random_string.suffix.result}"
   role = aws_iam_role.ec2_admin_role.name
 }
