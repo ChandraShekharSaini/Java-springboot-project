@@ -126,45 +126,7 @@ pipeline {
         // ============================================================
         // 8. Login to ECR
         // ============================================================
-        stage('Login to ECR') {
-            steps {
-                sh '''
-                    aws ecr get-login-password \
-                        --region ${AWS_REGION} | \
-                    docker login \
-                        --username AWS \
-                        --password-stdin ${ECR_REPOSITORY}
-                '''
-            }
-        }
-
-        // ============================================================
-        // 9. Push Docker Image
-        // ============================================================
-        stage('Push Docker Image') {
-            steps {
-                sh '''
-                    docker tag \
-                        ${IMAGE_NAME}:${IMAGE_TAG} \
-                        ${ECR_REPOSITORY}:${IMAGE_TAG}
-
-                    docker tag \
-                        ${IMAGE_NAME}:latest \
-                        ${ECR_REPOSITORY}:latest
-
-                    docker push \
-                        ${ECR_REPOSITORY}:${IMAGE_TAG}
-
-                    docker push \
-                        ${ECR_REPOSITORY}:latest
-                '''
-            }
-        }
-
-        // ============================================================
-        // 10. Deploy to PRIVATE EC2 using SSM
-        // ============================================================
-        stage('Deploy to Private EC2') {
+stage('Deploy to Private EC2') {
     steps {
         script {
 
@@ -197,8 +159,15 @@ pipeline {
 
             echo "SSM Command ID: ${commandId}"
 
-            sleep 5
+            // Wait until remote command finishes
+            sh """
+                aws ssm wait command-executed \
+                    --region ${AWS_REGION} \
+                    --command-id ${commandId} \
+                    --instance-id ${EC2_INSTANCE_ID}
+            """
 
+            // Display output
             sh """
                 aws ssm get-command-invocation \
                     --region ${AWS_REGION} \
@@ -206,6 +175,7 @@ pipeline {
                     --instance-id ${EC2_INSTANCE_ID}
             """
 
+            // Get final status
             def status = sh(
                 script: """
                     aws ssm get-command-invocation \
@@ -218,13 +188,21 @@ pipeline {
                 returnStdout: true
             ).trim()
 
+            echo "SSM Deployment Status: ${status}"
+
             if (status != 'Success') {
                 error("Remote deployment failed. SSM status: ${status}")
             }
+
+            echo "Deployment successful!"
         }
     }
 }
+
+
+      
     }
+    
 
     post {
 
@@ -245,4 +223,5 @@ pipeline {
             echo "CI/CD Pipeline Failed!"
         }
     }
+    
 }
