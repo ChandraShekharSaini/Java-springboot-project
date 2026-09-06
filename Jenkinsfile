@@ -101,8 +101,8 @@ pipeline {
             steps {
                 dir('backend') {
                     sh '''
-                        chmod +x mvnw || true
-                        ./mvn clean package -DskipTests
+                        
+                         mvn clean package -DskipTests
                     '''
                 }
             }
@@ -126,7 +126,45 @@ pipeline {
         // ============================================================
         // 8. Login to ECR
         // ============================================================
-stage('Deploy to Private EC2') {
+        stage('Login to ECR') {
+            steps {
+                sh '''
+                    aws ecr get-login-password \
+                        --region ${AWS_REGION} | \
+                    docker login \
+                        --username AWS \
+                        --password-stdin ${ECR_REPOSITORY}
+                '''
+            }
+        }
+
+        // ============================================================
+        // 9. Push Docker Image
+        // ============================================================
+        stage('Push Docker Image') {
+            steps {
+                sh '''
+                    docker tag \
+                        ${IMAGE_NAME}:${IMAGE_TAG} \
+                        ${ECR_REPOSITORY}:${IMAGE_TAG}
+
+                    docker tag \
+                        ${IMAGE_NAME}:latest \
+                        ${ECR_REPOSITORY}:latest
+
+                    docker push \
+                        ${ECR_REPOSITORY}:${IMAGE_TAG}
+
+                    docker push \
+                        ${ECR_REPOSITORY}:latest
+                '''
+            }
+        }
+
+        // ============================================================
+        // 10. Deploy to PRIVATE EC2 using SSM
+        // ============================================================
+     stage('Deploy to Private EC2') {
     steps {
         script {
 
@@ -148,7 +186,7 @@ stage('Deploy to Private EC2') {
                             "docker pull ${ECR_REPOSITORY}:${IMAGE_TAG}",
                             "docker stop ${IMAGE_NAME} || true",
                             "docker rm ${IMAGE_NAME} || true",
-                            "docker run -d --restart unless-stopped --name ${IMAGE_NAME} -p 8080:8080 ${ECR_REPOSITORY}:${IMAGE_TAG}",
+                            "docker run -d --restart unless-stopped --name ${IMAGE_NAME} -p 8080:8084 ${ECR_REPOSITORY}:${IMAGE_TAG}",
                             "docker ps"
                         ]' \
                         --query "Command.CommandId" \
@@ -198,11 +236,7 @@ stage('Deploy to Private EC2') {
         }
     }
 }
-
-
-      
     }
-    
 
     post {
 
@@ -223,5 +257,4 @@ stage('Deploy to Private EC2') {
             echo "CI/CD Pipeline Failed!"
         }
     }
-    
 }

@@ -18,8 +18,13 @@ output "private_ec2_1b_private_ip" {
   value = aws_instance.private_ec2_1b.private_ip
 }
 
-output "private_ec2_1a_instance_id" {
+output "private_backend_instance_id" {
   value = aws_instance.private_ec2_1a.id
+}
+
+
+output "private_frontend_instance_id" {
+  value = aws_instance.private_ec2_1b.id
 }
 
 output "ecr_repository_url" {
