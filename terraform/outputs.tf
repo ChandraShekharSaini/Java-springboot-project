@@ -25,7 +25,17 @@ output "private_backend_instance_id" {
 
 output "private_frontend_instance_id" {
   value = aws_instance.private_ec2_1b.id
+
 }
+
+output "private_backend_instance_ip" {
+  value = aws_instance.private_ec2_1a.private_ip
+}
+
+output "private_frontend_instance_ip" {
+  value = aws_instance.private_ec2_1b.private_ip
+}
+
 
 output "ecr_repository_url" {
   value = aws_ecr_repository.app.repository_url

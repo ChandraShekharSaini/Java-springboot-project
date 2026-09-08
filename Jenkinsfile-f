@@ -119,47 +119,55 @@ pipeline {
 
         stage('Get AWS Resource IDs') {
 
-            steps {
+    steps {
 
-                dir("${TERRAFORM_DIR}") {
+        dir("${TERRAFORM_DIR}") {
 
-                    script {
+            script {
 
-                        // Backend Private EC2
+                // Backend Private EC2 ID
+                env.BACKEND_EC2_ID = sh(
+                    script: 'terraform output -raw private_backend_instance_id',
+                    returnStdout: true
+                ).trim()
 
-                        env.BACKEND_EC2_ID = sh(
-                            script: 'terraform output -raw private_backend_instance_id',
-                            returnStdout: true
-                        ).trim()
+                // Frontend Private EC2 ID
+                env.FRONTEND_EC2_ID = sh(
+                    script: 'terraform output -raw private_frontend_instance_id',
+                    returnStdout: true
+                ).trim()
 
+                // Backend Private IP
+                env.BACKEND_PRIVATE_IP = sh(
+                    script: 'terraform output -raw private_backend_instance_ip',
+                    returnStdout: true
+                ).trim()
 
-                        // Frontend Private EC2
+                // Frontend Private IP
+                env.FRONTEND_PRIVATE_IP = sh(
+                    script: 'terraform output -raw private_frontend_instance_ip',
+                    returnStdout: true
+                ).trim()
 
-                        env.FRONTEND_EC2_ID = sh(
-                            script: 'terraform output -raw private_frontend_instance_id',
-                            returnStdout: true
-                        ).trim()
+                // ECR Repository
+                env.ECR_REPOSITORY = sh(
+                    script: 'terraform output -raw ecr_repository_url',
+                    returnStdout: true
+                ).trim()
 
-
-                        // ECR Repository
-
-                        env.ECR_REPOSITORY = sh(
-                            script: 'terraform output -raw ecr_repository_url',
-                            returnStdout: true
-                        ).trim()
-
-
-                        echo "=========================================="
-                        echo "AWS RESOURCES"
-                        echo "=========================================="
-                        echo "Backend EC2  : ${env.BACKEND_EC2_ID}"
-                        echo "Frontend EC2 : ${env.FRONTEND_EC2_ID}"
-                        echo "ECR          : ${env.ECR_REPOSITORY}"
-                        echo "=========================================="
-                    }
-                }
+                echo "=========================================="
+                echo "AWS RESOURCES"
+                echo "=========================================="
+                echo "Backend EC2 ID     : ${env.BACKEND_EC2_ID}"
+                echo "Backend Private IP : ${env.BACKEND_PRIVATE_IP}"
+                echo "Frontend EC2 ID    : ${env.FRONTEND_EC2_ID}"
+                echo "Frontend Private IP: ${env.FRONTEND_PRIVATE_IP}"
+                echo "ECR                : ${env.ECR_REPOSITORY}"
+                echo "=========================================="
             }
         }
+    }
+}
 
 
         // ============================================================
@@ -445,7 +453,7 @@ pipeline {
                             "docker pull ${ECR_REPOSITORY}:frontend-${IMAGE_TAG}",
                             "docker stop ${FRONTEND_IMAGE_NAME} || true",
                             "docker rm ${FRONTEND_IMAGE_NAME} || true",
-                            "docker run -d --restart unless-stopped --name ${FRONTEND_IMAGE_NAME} -p 8501:8501 -e API_URL=http://${BACKEND_EC2_ID}:8080 ${ECR_REPOSITORY}:frontend-${IMAGE_TAG}",
+                            "docker run -d --restart unless-stopped --name ${FRONTEND_IMAGE_NAME} -p 8501:8501 -e API_URL=http://${BACKEND_PRIVATE_IP}:8080 ${ECR_REPOSITORY}:frontend-${IMAGE_TAG}",
                             "sleep 5",
                             "docker ps",
                             "echo Frontend deployment completed"
