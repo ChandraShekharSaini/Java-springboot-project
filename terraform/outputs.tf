@@ -36,6 +36,10 @@ output "private_frontend_instance_ip" {
   value = aws_instance.private_ec2_1b.private_ip
 }
 
+output "frontend_alb_dns_name" {
+  value = aws_lb.frontend_alb.dns_name
+}
+
 
 output "ecr_repository_url" {
   value = aws_ecr_repository.app.repository_url

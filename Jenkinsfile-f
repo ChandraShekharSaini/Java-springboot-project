@@ -345,7 +345,7 @@ pipeline {
                             "docker pull ${ECR_REPOSITORY}:${IMAGE_TAG}",
                             "docker stop ${IMAGE_NAME} || true",
                             "docker rm ${IMAGE_NAME} || true",
-                            "docker run -d --restart unless-stopped --name ${IMAGE_NAME} -p 8080:8084 ${ECR_REPOSITORY}:${IMAGE_TAG}",
+                            "docker run -d --restart unless-stopped --name ${IMAGE_NAME} -p 8084:8084 ${ECR_REPOSITORY}:${IMAGE_TAG}",
                             "sleep 5",
                             "docker ps",
                             "echo Backend deployment completed"
@@ -453,7 +453,7 @@ pipeline {
                             "docker pull ${ECR_REPOSITORY}:frontend-${IMAGE_TAG}",
                             "docker stop ${FRONTEND_IMAGE_NAME} || true",
                             "docker rm ${FRONTEND_IMAGE_NAME} || true",
-                            "docker run -d --restart unless-stopped --name ${FRONTEND_IMAGE_NAME} -p 8501:8501 -e API_URL=http://${BACKEND_PRIVATE_IP}:8080 ${ECR_REPOSITORY}:frontend-${IMAGE_TAG}",
+                            "docker run -d --restart unless-stopped --name ${FRONTEND_IMAGE_NAME} -p 8501:8501 -e API_URL=http://${BACKEND_PRIVATE_IP}:8084 ${ECR_REPOSITORY}:frontend-${IMAGE_TAG}",
                             "sleep 5",
                             "docker ps",
                             "echo Frontend deployment completed"
