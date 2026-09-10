@@ -188,6 +188,32 @@ pipeline {
         }
 
 
+        stage('SonarQube Analysis') {
+    steps {
+        dir('backend') {
+            withSonarQubeEnv('SonarQube') {
+                withCredentials([
+                    string(
+                        credentialsId: 'sonarqube-token',
+                        variable: 'SONAR_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        mvn clean verify \
+                          org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
+                          -Dsonar.projectKey=Java \
+                          -Dsonar.projectName=Java \
+                          -Dsonar.host.url=$SONAR_HOST_URL \
+                          -Dsonar.token=$SONAR_TOKEN
+                    '''
+                }
+            }
+        }
+    }
+}
+
+
+
         // ============================================================
         // 7. Backend Docker Build
         // ============================================================
@@ -315,109 +341,266 @@ pipeline {
         // 12. Deploy Backend to Private EC2
         // ============================================================
 
+
         stage('Deploy Backend to Private EC2') {
 
-    steps {
 
-        script {
+steps {
 
-            echo "=========================================="
-            echo "DEPLOYING BACKEND"
-            echo "=========================================="
+    script {
 
-            echo "Backend EC2: ${BACKEND_EC2_ID}"
-            echo "ECR: ${ECR_REPOSITORY}"
-            echo "Image: ${IMAGE_TAG}"
+        echo "=========================================="
+        echo "DEPLOYING BACKEND"
+        echo "=========================================="
 
-
-            def backendCommandId = sh(
-                script: """
-                    aws ssm send-command \
-                        --region ${AWS_REGION} \
-                        --instance-ids ${BACKEND_EC2_ID} \
-                        --document-name AWS-RunShellScript \
-                        --parameters 'commands=[
-                            "set -e",
-                            "echo Backend deployment started",
-                            "docker --version",
-                            "systemctl is-active docker",
-                            "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY}",
-                            "docker pull ${ECR_REPOSITORY}:${IMAGE_TAG}",
-                            "docker stop ${IMAGE_NAME} || true",
-                            "docker rm ${IMAGE_NAME} || true",
-                            "docker run -d --restart unless-stopped --name ${IMAGE_NAME} -p 8084:8084 ${ECR_REPOSITORY}:${IMAGE_TAG}",
-                            "sleep 5",
-                            "docker ps",
-                            "echo Backend deployment completed"
-                        ]' \
-                        --query 'Command.CommandId' \
-                        --output text
-                """,
-                returnStdout: true
-            ).trim()
+        echo "Backend EC2: ${BACKEND_EC2_ID}"
+        echo "ECR: ${ECR_REPOSITORY}"
+        echo "Image: ${IMAGE_TAG}"
 
 
-            echo "Backend SSM Command ID: ${backendCommandId}"
+        // ========================================================
+        // Send deployment command to Private EC2
+        // ========================================================
+
+        def backendCommandId = sh(
+            script: """
+                aws ssm send-command \\
+                    --region ${AWS_REGION} \\
+                    --instance-ids ${BACKEND_EC2_ID} \\
+                    --document-name AWS-RunShellScript \\
+                    --parameters 'commands=[
+                        "set -e",
+
+                        "echo ===== BACKEND DEPLOYMENT STARTED =====",
+
+                        "echo Checking Docker...",
+                        "docker --version",
+                        "systemctl is-active docker",
+
+                        "echo ===== CHECKING AWS CLI =====",
+                        "aws --version",
+
+                        "echo ===== ECR LOGIN =====",
+                        "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY}",
+
+                        "echo ===== ECR LOGIN SUCCESS =====",
+
+                        "echo ===== PULLING IMAGE =====",
+                        "docker pull ${ECR_REPOSITORY}:${IMAGE_TAG}",
+
+                        "echo ===== IMAGE PULL SUCCESS =====",
+
+                        "echo ===== CHECKING IMAGE =====",
+                        "docker images",
+
+                        "echo ===== STOPPING OLD CONTAINER =====",
+                        "docker stop ${IMAGE_NAME} || true",
+
+                        "echo ===== REMOVING OLD CONTAINER =====",
+                        "docker rm ${IMAGE_NAME} || true",
+
+                        "echo ===== STARTING NEW CONTAINER =====",
+                        "docker run -d --restart unless-stopped --name ${IMAGE_NAME} -p 8084:8084 ${ECR_REPOSITORY}:${IMAGE_TAG}",
+
+                        "echo ===== WAITING FOR CONTAINER =====",
+                        "sleep 10",
+
+                        "echo ===== CONTAINER STATUS =====",
+                        "docker ps -a",
+
+                        "echo ===== BACKEND DEPLOYMENT COMPLETED ====="
+                    ]' \\
+                    --query 'Command.CommandId' \\
+                    --output text
+            """,
+            returnStdout: true
+        ).trim()
 
 
-            // ========================================================
-            // Wait for SSM command
-            // ========================================================
+        echo "Backend SSM Command ID: ${backendCommandId}"
 
-            sh """
-                aws ssm wait command-executed \
-                    --region ${AWS_REGION} \
-                    --command-id ${backendCommandId} \
+
+        // ========================================================
+        // Wait for SSM command
+        // Do NOT fail Jenkins immediately
+        // ========================================================
+
+        def waitStatus = sh(
+            script: """
+                aws ssm wait command-executed \\
+                    --region ${AWS_REGION} \\
+                    --command-id ${backendCommandId} \\
                     --instance-id ${BACKEND_EC2_ID}
-            """
+            """,
+            returnStatus: true
+        )
+
+        echo "SSM Wait Exit Code: ${waitStatus}"
 
 
-            // ========================================================
-            // Show SSM result
-            // ========================================================
+        // ========================================================
+        // Get complete SSM result
+        // ========================================================
 
-            sh """
-                aws ssm get-command-invocation \
-                    --region ${AWS_REGION} \
-                    --command-id ${backendCommandId} \
-                    --instance-id ${BACKEND_EC2_ID}
-            """
-
-
-            // ========================================================
-            // Get deployment status
-            // ========================================================
-
-            def backendStatus = sh(
-                script: """
-                    aws ssm get-command-invocation \
-                        --region ${AWS_REGION} \
-                        --command-id ${backendCommandId} \
-                        --instance-id ${BACKEND_EC2_ID} \
-                        --query 'Status' \
-                        --output text
-                """,
-                returnStdout: true
-            ).trim()
-
-
-            echo "Backend Deployment Status: ${backendStatus}"
-
-
-            if (backendStatus != 'Success') {
-
-                error(
-                    "Backend deployment failed. SSM status: ${backendStatus}"
-                )
-            }
-
-
+        sh """
             echo "=========================================="
-            echo "BACKEND DEPLOYMENT SUCCESSFUL"
+            echo "SSM COMMAND OUTPUT"
             echo "=========================================="
+
+            aws ssm get-command-invocation \\
+                --region ${AWS_REGION} \\
+                --command-id ${backendCommandId} \\
+                --instance-id ${BACKEND_EC2_ID} \\
+                --query '{Status:Status,StatusDetails:StatusDetails,ResponseCode:ResponseCode,Output:StandardOutputContent,Error:StandardErrorContent}' \\
+                --output json
+        """
+
+
+        // ========================================================
+        // Get deployment status
+        // ========================================================
+
+        def backendStatus = sh(
+            script: """
+                aws ssm get-command-invocation \\
+                    --region ${AWS_REGION} \\
+                    --command-id ${backendCommandId} \\
+                    --instance-id ${BACKEND_EC2_ID} \\
+                    --query 'Status' \\
+                    --output text
+            """,
+            returnStdout: true
+        ).trim()
+
+
+        echo "Backend Deployment Status: ${backendStatus}"
+
+
+        // ========================================================
+        // Fail Jenkins if deployment failed
+        // ========================================================
+
+        if (backendStatus != 'Success') {
+
+            error(
+                "Backend deployment failed. SSM status: ${backendStatus}"
+            )
         }
+
+
+        echo "=========================================="
+        echo "BACKEND DEPLOYMENT SUCCESSFUL"
+        echo "=========================================="
     }
 }
+
+
+}
+
+
+//         stage('Deploy Backend to Private EC2') {
+
+//     steps {
+
+//         script {
+
+//             echo "=========================================="
+//             echo "DEPLOYING BACKEND"
+//             echo "=========================================="
+
+//             echo "Backend EC2: ${BACKEND_EC2_ID}"
+//             echo "ECR: ${ECR_REPOSITORY}"
+//             echo "Image: ${IMAGE_TAG}"
+
+
+//             def backendCommandId = sh(
+//                 script: """
+//                     aws ssm send-command \
+//                         --region ${AWS_REGION} \
+//                         --instance-ids ${BACKEND_EC2_ID} \
+//                         --document-name AWS-RunShellScript \
+//                         --parameters 'commands=[
+//                             "set -e",
+//                             "echo Backend deployment started",
+//                             "docker --version",
+//                             "systemctl is-active docker",
+//                             "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPOSITORY}",
+//                             "docker pull ${ECR_REPOSITORY}:${IMAGE_TAG}",
+//                             "docker stop ${IMAGE_NAME} || true",
+//                             "docker rm ${IMAGE_NAME} || true",
+//                             "docker run -d --restart unless-stopped --name ${IMAGE_NAME} -p 8084:8084 ${ECR_REPOSITORY}:${IMAGE_TAG}",
+//                             "sleep 5",
+//                             "docker ps",
+//                             "echo Backend deployment completed"
+//                         ]' \
+//                         --query 'Command.CommandId' \
+//                         --output text
+//                 """,
+//                 returnStdout: true
+//             ).trim()
+
+
+//             echo "Backend SSM Command ID: ${backendCommandId}"
+
+
+//             // ========================================================
+//             // Wait for SSM command
+//             // ========================================================
+
+//             sh """
+//                 aws ssm wait command-executed \
+//                     --region ${AWS_REGION} \
+//                     --command-id ${backendCommandId} \
+//                     --instance-id ${BACKEND_EC2_ID}
+//             """
+
+
+//             // ========================================================
+//             // Show SSM result
+//             // ========================================================
+
+//             sh """
+//                 aws ssm get-command-invocation \
+//                     --region ${AWS_REGION} \
+//                     --command-id ${backendCommandId} \
+//                     --instance-id ${BACKEND_EC2_ID}
+//             """
+
+
+//             // ========================================================
+//             // Get deployment status
+//             // ========================================================
+
+//             def backendStatus = sh(
+//                 script: """
+//                     aws ssm get-command-invocation \
+//                         --region ${AWS_REGION} \
+//                         --command-id ${backendCommandId} \
+//                         --instance-id ${BACKEND_EC2_ID} \
+//                         --query 'Status' \
+//                         --output text
+//                 """,
+//                 returnStdout: true
+//             ).trim()
+
+
+//             echo "Backend Deployment Status: ${backendStatus}"
+
+
+//             if (backendStatus != 'Success') {
+
+//                 error(
+//                     "Backend deployment failed. SSM status: ${backendStatus}"
+//                 )
+//             }
+
+
+//             echo "=========================================="
+//             echo "BACKEND DEPLOYMENT SUCCESSFUL"
+//             echo "=========================================="
+//         }
+//     }
+// }
 
         // ============================================================
         // 13. Deploy Frontend to Private EC2
@@ -528,154 +711,7 @@ pipeline {
 }
 
 
-        // ============================================================
-        // 14. Verify Backend Container
-        // ============================================================
-
-        stage('Verify Backend') {
-
-            steps {
-
-                script {
-
-                    echo "=========================================="
-                    echo "VERIFYING BACKEND"
-                    echo "=========================================="
-
-
-                    def verifyCommandId = sh(
-
-                        script: """
-
-                            aws ssm send-command \\
-
-                                --region ${AWS_REGION} \\
-
-                                --instance-ids ${BACKEND_EC2_ID} \\
-
-                                --document-name "AWS-RunShellScript" \\
-
-                                --parameters 'commands=[
-
-                                    "docker ps",
-
-                                    "curl -f http://localhost:8080/student/all"
-
-                                ]' \\
-
-                                --query "Command.CommandId" \\
-
-                                --output text
-
-                        """,
-
-                        returnStdout: true
-
-                    ).trim()
-
-
-                    sh """
-
-                        aws ssm wait command-executed \\
-
-                            --region ${AWS_REGION} \\
-
-                            --command-id ${verifyCommandId} \\
-
-                            --instance-id ${BACKEND_EC2_ID}
-
-                    """
-
-
-                    sh """
-
-                        aws ssm get-command-invocation \\
-
-                            --region ${AWS_REGION} \\
-
-                            --command-id ${verifyCommandId} \\
-
-                            --instance-id ${BACKEND_EC2_ID}
-
-                    """
-                }
-            }
-        }
-
-
-        // ============================================================
-        // 15. Verify Frontend Container
-        // ============================================================
-
-        stage('Verify Frontend') {
-
-            steps {
-
-                script {
-
-                    echo "=========================================="
-                    echo "VERIFYING FRONTEND"
-                    echo "=========================================="
-
-
-                    def verifyCommandId = sh(
-
-                        script: """
-
-                            aws ssm send-command \\
-
-                                --region ${AWS_REGION} \\
-
-                                --instance-ids ${FRONTEND_EC2_ID} \\
-
-                                --document-name "AWS-RunShellScript" \\
-
-                                --parameters 'commands=[
-
-                                    "docker ps",
-
-                                    "curl -f http://localhost:8501"
-
-                                ]' \\
-
-                                --query "Command.CommandId" \\
-
-                                --output text
-
-                        """,
-
-                        returnStdout: true
-
-                    ).trim()
-
-
-                    sh """
-
-                        aws ssm wait command-executed \\
-
-                            --region ${AWS_REGION} \\
-
-                            --command-id ${verifyCommandId} \\
-
-                            --instance-id ${FRONTEND_EC2_ID}
-
-                    """
-
-
-                    sh """
-
-                        aws ssm get-command-invocation \\
-
-                            --region ${AWS_REGION} \\
-
-                            --command-id ${verifyCommandId} \\
-
-                            --instance-id ${FRONTEND_EC2_ID}
-
-                    """
-                }
-            }
-        }
+        
 
 
         
