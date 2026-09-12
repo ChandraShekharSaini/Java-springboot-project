@@ -1,2 +1,2 @@
-ami_id = "ami-03db3415e6524c5d2"
+ami_id = "ami-0354c98ae10b02961"
 key_name = "name"
